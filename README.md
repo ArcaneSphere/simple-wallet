@@ -1,6 +1,3 @@
-Test by ArcaneSphere
-Does this work :)
-
 # simple-wallet
 
 This is a simple Dero wallet built using Fyne.
