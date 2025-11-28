@@ -18,6 +18,7 @@ import (
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 	"github.com/chzyer/readline"
+	"github.com/creachadair/jrpc2/handler"
 	"github.com/deroproject/derohe/blockchain"
 	derodrpc "github.com/deroproject/derohe/cmd/derod/rpc"
 	"github.com/deroproject/derohe/config"
@@ -509,8 +510,30 @@ func ws_server() {
 			program.entries.port.Disable()
 
 			program.ws_server = xswdServer(p)
+
+			// let's set some custom methods
+			for _, each := range []struct {
+				method      string
+				handlerfunc handler.Func
+			}{
+				{
+					method:      "GetAssets",
+					handlerfunc: handler.New(getAssets),
+				},
+				{
+					method:      "GetAssetBalance",
+					handlerfunc: handler.New(getAssetBalance),
+				},
+				{
+					method:      "AttemptEPOCHWithAddr",
+					handlerfunc: handler.New(attemptEPOCHWithAddr),
+				},
+			} {
+				program.ws_server.SetCustomMethod(each.method, each.handlerfunc)
+			}
+
 			if program.ws_server != nil && program.ws_server.IsRunning() {
-				// assuming there are now errors here...
+				// assuming there are no errors here...
 				program.toggles.ws_server.SetSelected("on")
 				program.labels.ws_server.SetText("WS: ✅")
 			}
@@ -1102,12 +1125,12 @@ These wallets are started with RPC servers ON without username or password. Endp
 func balance_rescan() {
 	// nice big notice
 	big_notice :=
-		"This action will clear all transfer history and balances. " +
-			"Balances are nearly instant in resync; however... " +
-			"Tx history depends on node status, eg pruned/full... " +
-			"Some txs may not be available at your node connection. " +
-			"For full history, and privacy, run a full node starting at block 0 upto current topoheight. " +
-			"This operation could take a long time with many token assets and transfers. "
+		"This action is a non-cancelable action that will clear all transfer history and balances.\n" +
+			"Balances are nearly instant in resync; however...\n" +
+			"Tx history depends on node status, eg pruned/full...\n" +
+			"Some txs may not be available at your node connection.\n" +
+			"For full history, and privacy, run a full node starting at block 0 upto current topoheight.\n" +
+			"This operation could take a long time with many token assets and transfers."
 
 	// create a callback function
 	callback := func(b bool) {

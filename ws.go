@@ -2,15 +2,21 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"runtime"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
+	"github.com/civilware/epoch"
 	"github.com/creachadair/jrpc2"
+	"github.com/deroproject/derohe/cryptography/crypto"
 	"github.com/deroproject/derohe/rpc"
 	"github.com/deroproject/derohe/walletapi/xswd"
 )
@@ -45,7 +51,7 @@ func xswdAppHandler(data *xswd.ApplicationData) bool {
 	// let's verify this real quick
 	address, message, err := program.wallet.CheckSignature([]byte(data.Signature))
 	if err != nil {
-		showError(fmt.Errorf("app authorization resulted in err:\n%s", err), program.window)
+		showError(fmt.Errorf("app authorization signature resulted in err:\n%s", err), program.window)
 		return reject
 	}
 	// fmt.Println(address.String(), string(message))
@@ -55,12 +61,12 @@ func xswdAppHandler(data *xswd.ApplicationData) bool {
 	var msg []byte
 	msg, err = hex.DecodeString(string(message))
 	if err != nil {
-		showError(fmt.Errorf("app authorization resulted in err:\n%s", err), program.window)
+		showError(fmt.Errorf("app authorization message decoding resulted in err:\n%s", err), program.window)
 		return reject
 	}
 	id, err := hex.DecodeString(data.Id)
 	if err != nil {
-		showError(fmt.Errorf("app authorization resulted in err:\n%s", err), program.window)
+		showError(fmt.Errorf("app authorization data.Id resulted in err:\n%s", err), program.window)
 		return reject
 	}
 
@@ -261,4 +267,79 @@ func xswdRequestHandler(data *xswd.ApplicationData, r *jrpc2.Request) xswd.Permi
 
 	// default is to deny
 	return xswd.Deny
+}
+
+type getAssetsResult struct {
+	SCIDS []string `json:"scids"`
+}
+
+func getAssets(ctx context.Context) (getAssetsResult, error) {
+	scids := []string{}
+	for _, each := range program.caches.assets {
+		scids = append(scids, each.hash)
+	}
+	return getAssetsResult{scids}, nil
+}
+
+type getAssetBalanceParams struct {
+	Height int64
+	SCID   string
+}
+type getAssetBalanceResult struct {
+	Balance uint64 `json:"balance"`
+}
+
+func getAssetBalance(ctx context.Context, params getAssetBalanceParams) (getAssetBalanceResult, error) {
+
+	hash := crypto.HashHexToHash(params.SCID)
+
+	height := params.Height // -1 is current topoheight
+
+	address := program.wallet.GetAddress()
+
+	bal, _, err := program.wallet.GetDecryptedBalanceAtTopoHeight(hash, height, address.String())
+
+	if err != nil {
+		return getAssetBalanceResult{}, err
+	}
+
+	return getAssetBalanceResult{bal}, nil
+}
+
+type getAttemptEpochParams struct {
+	Hashes  int    `json:"hashes"`
+	Address string `json:"address"`
+}
+
+func attemptEPOCHWithAddr(ctx context.Context, params getAttemptEpochParams) (epoch.EPOCH_Result, error) {
+
+	reserve := 2 // one for the app and one for the os
+	threads := runtime.GOMAXPROCS(0)
+	maximum := threads - reserve
+
+	epoch.SetMaxThreads(maximum)
+	addr, err := rpc.NewAddress(params.Address)
+	if err != nil {
+		return epoch.EPOCH_Result{}, errors.New("invalid address")
+	}
+
+	endpoint := program.node.current
+
+	err = epoch.StartGetWork(addr.String(), endpoint)
+	if err != nil {
+		return epoch.EPOCH_Result{}, errors.New("failed start get work server")
+	}
+	defer epoch.StopGetWork()
+
+	timeout := time.Second * 10
+
+	err = epoch.JobIsReady(timeout)
+	if err != nil {
+		return epoch.EPOCH_Result{}, errors.New("failed get job before timeout")
+	}
+
+	// the smaller of the two
+	hashes := min(params.Hashes, epoch.LIMIT_MAX_HASHES)
+
+	return epoch.AttemptHashes(hashes)
 }

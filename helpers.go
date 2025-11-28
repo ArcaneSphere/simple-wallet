@@ -1561,6 +1561,11 @@ func asset_scan() {
 		layout.NewSpacer(),
 	)
 	syncro := dialog.NewCustomWithoutButtons("syncing", content, program.window)
+	cancel := make(chan struct{})
+	syncro.SetButtons([]fyne.CanvasObject{widget.NewButton("cancel", func() {
+		label.SetText("Cancel initiated, pls wait")
+		close(cancel)
+	})})
 	callback := func(b bool) {
 		// if they cancel
 		if !b {
@@ -1611,6 +1616,11 @@ func asset_scan() {
 			work := func() {
 				defer wg.Done()
 				for scid := range scid_chan {
+					select {
+					case <-cancel:
+						return
+					default:
+					}
 					counter++
 					fyne.DoAndWait(func() { scids.SetValue(float64(counter) / float64(scid_count)) })
 					hash := crypto.HashHexToHash(scid)
@@ -1654,13 +1664,27 @@ func asset_scan() {
 				syncing.Show()
 				syncing.Start()
 			})
-			buildAssetHashList()
-			fyne.DoAndWait(func() {
-				showInfo("Asset Scan", "Scan complete", program.window)
-				syncing.Stop()
-				syncing.Hide()
-				syncro.Dismiss()
-			})
+			finish := func() {
+				buildAssetHashList()
+				fyne.DoAndWait(func() {
+					syncing.Stop()
+					syncing.Hide()
+					program.lists.asset_list.Refresh()
+					syncro.Dismiss()
+				})
+			}
+			select {
+			case <-cancel:
+				finish()
+				return
+			default:
+				finish()
+				fyne.DoAndWait(func() {
+					showInfo("Asset Scan", "Scan complete", program.window)
+				})
+
+			}
+
 		}()
 	}
 	notice := `
@@ -1719,6 +1743,11 @@ func slide_network(f float64) {
 		program.labels.current_node.SetText("Current Node: " + program.node.current)
 		program.entries.node.Refresh()
 		globals.InitNetwork()
+		// lets create data directories
+		if err := os.MkdirAll(globals.GetDataDirectory(), 0750); err != nil {
+			panic(err)
+		}
+
 		setText(msg, program.labels.notice)
 	}
 	if program.sliders.network.Value > 0.33 && program.sliders.network.Value < 0.66 {
@@ -1739,6 +1768,11 @@ func slide_network(f float64) {
 		program.labels.current_node.SetText("Current Node: " + program.node.current)
 		program.entries.node.Refresh()
 		globals.InitNetwork()
+		// lets create data directories
+		if err := os.MkdirAll(globals.GetDataDirectory(), 0750); err != nil {
+			panic(err)
+		}
+
 		setText(msg, program.labels.notice)
 	}
 	if program.sliders.network.Value > 0.66 && program.sliders.network.Value <= 1 {
@@ -1758,6 +1792,11 @@ func slide_network(f float64) {
 		program.labels.current_node.SetText("Current Node: " + program.node.current)
 		program.entries.node.Refresh()
 		globals.InitNetwork()
+		// lets create data directories
+		if err := os.MkdirAll(globals.GetDataDirectory(), 0750); err != nil {
+			panic(err)
+		}
+
 		setText(msg, program.labels.notice)
 	}
 }
